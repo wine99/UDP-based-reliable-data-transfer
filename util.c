@@ -79,4 +79,23 @@ void printPacket(action a, packet* p, int isResend) {
     printLine(a, &(p->head), isResend);
 }
 
+void printClientResend(packet* p) {
+    header* h = &p->head;
+    char line[128];
+    memset(line, 0, 128);
+    snprintf(line, sizeof(line), "RESEND seq:%u ack:%u\n", (unsigned int)h->seq, (unsigned int)h->ack);
+    printf("%s", line);
+}
+
+int isOldAck(window* w, header* p) {
+    int expectedAck = w->initSeq;
+    for (int i = 0; i < w->size; ++i) {
+        expectedAck += w->p[i].head.len;
+        expectedAck = (expectedAck > SEQNUM) ? (expectedAck % (SEQNUM + 1)) : expectedAck;
+        if (expectedAck == p->ack)
+            return 0;
+    }
+    return 1;
+}
+
 int min(int a, int b) { return (a > b) ? b : a; }

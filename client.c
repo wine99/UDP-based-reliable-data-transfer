@@ -8,6 +8,10 @@
 
 #include "util.h"
 
+/* control the send losing probability,
+range from 0 to 9, 9 or above means always lost. */
+int loseProb = 2;
+
 struct sockaddr_in servaddr;
 socklen_t len = sizeof(servaddr);
 int sockfd;
@@ -47,6 +51,7 @@ int main(int argc, char** argv) {
     srand(time(0));
     /* send SYN */
     uint16_t initSeq = rand() % SEQNUM;
+    // uint16_t initSeq = 16850;
     header sp;
     createHeader(&sp, initSeq, 0, 0, 1, 0);
 
@@ -122,7 +127,6 @@ int main(int argc, char** argv) {
         char* temp = (char*)malloc(DATASIZE * sizeof(char));
         memset(temp, 0, DATASIZE);
         memcpy(temp, buffer + fileNumber * DATASIZE, remainBytes);
-        // strncpy(temp,buffer+fileNumber*511,remainBytes);
         createPacket(&p[fileNumber], seq, 0, 0, 0, 0, temp, remainBytes);
 
         seq += remainBytes;
@@ -147,37 +151,30 @@ int main(int argc, char** argv) {
             header tempAck;
             n = recvfrom(sockfd, &tempAck, HEADSIZE, 0, (struct sockaddr*)&servaddr, &len);
             if (n != -1) {
-                // int greaterThanMaxSeq = 0;
                 printLine(RECV, &tempAck, 0);
                 int expectedAck = w.initSeq + w.p[0].head.len;
-                // if (expectedAck > SEQNUM) greaterThanMaxSeq = 1;
                 expectedAck = (expectedAck > SEQNUM) ? (expectedAck % (SEQNUM + 1)) : expectedAck;
                 if (tempAck.ACK_FLAG != 1) {
                     errorHandler("Wrong ACK packet.");
-                } else if ( tempAck.ack < expectedAck) {
-                    continue;
-                } else if (tempAck.ack == expectedAck) {
-                    moveWindow(&w, p, packetNumber);
-                    if (w.size == 10) {
-                        sendLastPacket(w);
-                    }
-                    if (w.size == 0) {
-                        break;
-                    }
-                    startTime = time(0);
-                } else {
-                    /* tempAck.ack > expectedAck means that 
-                    server has received some packet but one the ACKs is lost,
-                    so it's ok to move forward. */
-                    while (expectedAck < tempAck.ack) {
+                } else if (isOldAck(&w, &tempAck) == 0) {
+                    while (expectedAck != tempAck.ack) {
+                        // printf("expected ACK: %d\n", expectedAck);
                         moveWindow(&w, p, packetNumber);
-                        if (w.size == 10) {
+                        printf("move window, size after move: %d\n", w.size);
+                        if (w.size == 10)
                             sendLastPacket(w);
-                        }
-                        if (w.size == 0) {
+                        if (w.size == 0)
                             break;
-                        }
+                        expectedAck += w.p[0].head.len;
+                        expectedAck = (expectedAck > SEQNUM) ? (expectedAck % (SEQNUM + 1)) : expectedAck;
                     }
+                    // printf("expected ACK: %d\n", expectedAck);
+                    moveWindow(&w, p, packetNumber);
+                    printf("move window, size after move: %d\n", w.size);
+                    if (w.size == 10)
+                        sendLastPacket(w);
+                    if (w.size == 0)
+                        break;
                     startTime = time(0);
                 }
             }
@@ -297,14 +294,16 @@ void finish(int seq, int ack) {
 void sendWindow(window w, int isResend) {
     int i = 0;
     for (i = 0; i < w.size; i++) {
-        int n = sendto(sockfd, &(w.p[i]), PACKETSIZE, 0, (struct sockaddr*)&servaddr, len);
-        if (n < 0) {
-            errorHandler("Failed to send data to server.");
+        if (isResend)
+            printClientResend(&(w.p[i]));
+        else
+            printPacket(SEND, &(w.p[i]), 0);
+        if (rand() % 10 >= loseProb) {
+            int n = sendto(sockfd, &(w.p[i]), PACKETSIZE, 0, (struct sockaddr*)&servaddr, len);
+            if (n < 0)
+                errorHandler("Failed to send data to server.");
         } else {
-            if (isResend)
-                printPacket(RESEND, &(w.p[i]), 0);
-            else
-                printPacket(SEND, &(w.p[i]), 0);
+            printf("seq: %d lost.\n", w.p[i].head.seq);
         }
     }
 }

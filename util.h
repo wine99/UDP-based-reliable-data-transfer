@@ -60,6 +60,11 @@ void printLine(action a, header* p, int isResend);
 /* print message with payload */
 void printPacket(action a, packet* p, int isResend);
 
+/* print message with payload */
+void printClientResend(packet* p);
+
+int isOldAck(window* w, header* p);
+
 /* min function */
 int min(int a, int b);
 

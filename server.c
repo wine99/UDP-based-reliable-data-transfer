@@ -7,6 +7,10 @@
 
 #include "util.h"
 
+/* control the send losing probability,
+range from 0 to 9, 9 or above means always lost. */
+int loseProb = 2;
+
 struct sockaddr_in my_addr;    /* my address */
 struct sockaddr_in their_addr; /* connector addr */
 socklen_t len = sizeof(their_addr);
@@ -103,40 +107,40 @@ int main(int argc, char **argv) {
                 } else if (temp.head.SYN_FLAG == 1) {
                     /* receive duplicated SYN, resend ACK */
                     printPacket(RECV, &temp, 0);
-                    n = sendto(sockfd, &sa, HEADSIZE, 0, (struct sockaddr *)&their_addr, len);
-                    if (n <= 0) {
-                        errorHandler("Could not send to client.");
+                    printLine(RESEND, &sa, 0);
+                    if (rand() % 10 >= loseProb) {
+                        n = sendto(sockfd, &sa, HEADSIZE, 0, (struct sockaddr *)&their_addr, len);
+                        if (n <= 0);
+                            errorHandler("Could not send to client.");
                     } else {
-                        printLine(RESEND, &sa, 0);
+                        printf("DUP ACK: %d lost.\n", sa.ack);
                     }
                 } else if (temp.head.seq != ack) {
-                    /* receive a SEQ indicating an old packet that's already received,
-                    meaning the old ACK might not have lost. So resend ACK.
-                    But a server will never print RESEND because duplicate ACK
-                    transmission is not considered to be retransmission. */
                     printPacket(RECV, &temp, 0);
                     header dupAck;
                     createHeader(&dupAck, seq, ack, 1, 0, 0);
-
-                    n = sendto(sockfd, &dupAck, HEADSIZE, 0, (struct sockaddr *)&their_addr, len);
-                    if (n < 0) {
-                        errorHandler("Failed to send to client");
+                    printLine(SEND, &dupAck, 1);
+                    if (rand() % 10 >= loseProb) {
+                        n = sendto(sockfd, &dupAck, HEADSIZE, 0, (struct sockaddr *)&their_addr, len);
+                        if (n < 0)
+                            errorHandler("Failed to send to client");
                     } else {
-                        printLine(SEND, &dupAck, 1);
+                        printf("DUP ACK: %d lost.\n", dupAck.ack);
                     }
                 } else {
                     printPacket(RECV, &temp, 0);
                     ack += temp.head.len;
                     ack = (ack > SEQNUM) ? (ack % (SEQNUM + 1)) : ack;
                     fwrite(temp.payload, 1, temp.head.len, log);
-
                     header tempAck;
                     createHeader(&tempAck, seq, ack, 1, 0, 0);
-                    n = sendto(sockfd, &tempAck, HEADSIZE, 0, (struct sockaddr *)&their_addr, len);
-                    if (n < 0) {
-                        errorHandler("Failed to send to the client.");
+                    printLine(SEND, &tempAck, 0);
+                    if (rand() % 10 >= loseProb) {
+                        n = sendto(sockfd, &tempAck, HEADSIZE, 0, (struct sockaddr *)&their_addr, len);
+                        if (n < 0)
+                            errorHandler("Failed to send to the client.");
                     } else {
-                        printLine(SEND, &tempAck, 0);
+                        printf("ACK: %d lost.\n", tempAck.ack);
                     }
                 }
             }
@@ -178,16 +182,7 @@ void finish(int seq, int ack) {
     header fin3;
     time_t finTime = time(0);
     while (1) {
-        // if ((time(0) - finTime) > 0.5) {
         if ((time(0) - finTime) > 2.0) {
-        //     printf("TIMEOUT %i\n", seq);
-        //     n = sendto(sockfd, &fin2, HEADSIZE, 0, (struct sockaddr *)&their_addr, len);
-        //     if (n < 0) {
-        //         errorHandler("Can't send to client.");
-        //     } else {
-        //         printLine(RESEND, &fin2, 0);
-        //         finTime = time(0);
-        //     }
             printf("TIMEOUT for receiving the final ACK(seq: %i), closed.\n", seq);
             printf("connection closed.\n");
             break;
